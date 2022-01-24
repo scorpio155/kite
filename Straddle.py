@@ -1,6 +1,15 @@
+# what is python stops and we restart, we need to track our orders and positions per strategy
+# multiple users, multiple stratgies
+# error handling and retry logic
+# telegram alert
+# paper trade option
+# class strategy and execution of all of this.
+# note in this case, on combined SL, we are exiting the straddle and creating a new leg on the one which is profitable.
+# we can continue to keep the profit leg and add a new leg.
+
 from kiteutils import kitelogin, get_symbol_token_list, set_symbol_token
 # from kiteutils import on_ticks, on_connect, on_close
-from kiteutils import short_market_order
+from kiteutils import short_market_order , squareoff_market_order
 import time
 import pandas as pd
 import numpy as np
@@ -30,19 +39,6 @@ atm = int(round(atm,-2))
 print ('At the Money Rounded Strike {}'.format(atm))
 frame = get_symbol_token_list("BANKNIFTY")
 
-### Skip the below code, more for seeing if the symbol value is created correctly.
-
-# frame[((frame.strike == atm))]
-# instrument_token	exchange_token	tradingsymbol	name	last_price	expiry	strike	tick_size	lot_size	instrument_type
-
-# atm call and put option with latest weekly expiry dates
-    # skip this as the code was not working well.
-    # bnf_ce_symbol = "BANKNIFTY" + expiry + str(strike) + "CE"
-    # bnf_pe_symbol = "BANKNIFTY" + expiry + str(strike) + "PE"
-
-    # bnf_ce_symbol, = kite.ltp("NFO:"+bnf_ce_symbol)["NFO:"+bnf_ce_symbol]['instrument_token']
-
-# at the money call and put option of the current weekly options.
 
 ce_frame = set_symbol_token(frame,atm,"CE")
 pe_frame = set_symbol_token(frame,atm,"PE")
@@ -130,6 +126,10 @@ while datetime.datetime.today() < datetime.datetime.combine(datetime.datetime.to
         
         ce_squareoff_order_id = squareoff_market_order(kite, bnf_ce_symbol, 2500)
         pe_squareoff_order_id = squareoff_market_order(kite, bnf_pe_symbol, 2500)
+        
+        # Once combined SL is hit, we are squaring both the legs and then taking a new position.
+        # below code is to understand which Leg we need to sell atm when this is hit.
+        
         if ltp_dict[bnf_ce_token] > ce_short_order['average_price']:
             leg = 'PE'
         elif ltp_dict[bnf_pe_token] > pe_short_order['average _price']:
@@ -148,90 +148,67 @@ if not stoploss_exit1:
     ce_squareoff_order_id = squareoff_market_order(kite, bnf_ce_symbol, 2500)
     pe_squareoff_order_id = squareoff_market_order(kite, bnf_pe_symbol, 2500)
     kws.unsubscribe(token_list)
+    #above is to unsubscribe all earlier tokens and take a new entry,
+    #I would prefer to just add a new extra entry to the exisiting leg
     time.sleep(5)
-              
 
-
-"""
-# have to add the second leg call/put option additional after the SL has hit.
-else:
-
+# below is section for SL has been hit, take trades
+else: 
     print('Entering a position in the 2nd leg: {}'.format(leg))
-    strike = kite.1tp(bnf_symbol)[bnf_symbol][‘last_price’]
-    strike = int(round(strike, -2))
+    # find new ATM   
+    atm_leg = kite.ltp(bnf_symbol)[bnf_symbol]['last_price']
+    atm_leg = int(round(atm,-2))
+    print ('At the Money Rounded Strike {}'.format(atm_leg))
+    
+    leg_frame = set_symbol_token(frame,atm_leg,leg)
+    # frame here has all the symbol, tokens taken up from earlier time.
+    
+    # set leg symbol and tokens
 
-    expiry = weekly_expiry(kite)
+    bnf_leg_symbol = leg_frame['tradingsymbol'].values[0]
+    bnf_leg_token = int(leg_frame['instrument_token'].values[0])
+    
+    # token_list = [bnf_ce_token,bnf_pe_token]
+    # since only one leg, we will directly subscribe to only that one leg via kite API
+    print('BankNifty New Leg option (symbol:token): ({}, {})'.format(bnf_leg_symbol, bnf_leg_token))
+    
+    kws.subscribe(bnf_leg_token)
+    kws.set_mode(kws.MODE_LTP,bnf_leg_token)
 
-    bnf_leg_ symbol = “BANKNIFTY” + expiry + str(strike) + leg
+    # Placing the order
 
-bnf_leg_token =kite.ltp("NFO:“+bnf_leg_symbol)[“NFO:"+bnf_leg_symbol][‘instrument_token’ ]
-print('Banknifty 2nd leg option (symbol, token): ({}, {})'.format(bnf_leg symbol, bnf_leg token) )
+    leg_short_order_id = short_market_order(kite, bnf_leg_symbol, 2500)
+    time.sleep(5)
+    print('2nd leg short order placed')
+    
+    orders = kite.orders()
+    
+    leg_short_order = next(order for order in orders if order['order_id'] == leg_short_order_id)
+    while not leg_short_order['status'] == 'COMPLETE':
+        time.sleep(1)
+    print('2nd leg short order completed')
 
-kws.subscribe([bnf_leg token])
-kws.set_mode(kws.MODE_LTP, [bnf_leg_token])
+    leg_entry_price = leg_short_order['average_price']
+    leg_stoploss = leg_entry_price * 1.2
+    stoploss_exit2 = 0
 
-leg_short_order_id = short_market_order(kite, bnf_ce_symbol, 25)
-time.sleep(5)
-print('2nd leg short order placed’)
+    print("2nd leg short entry price:", leg_entry_price)
+    print("2nd leg stoploss price:", leg_stoploss)
 
-#### 
+    while datetime.datetime.today() < datetime.datetime.combine(datetime.datetime.today(), TRADER_STOP_TIME):
 
-print(‘2nd leg short order placed’)
+        if ltp_dict[bnf_leg_token] > leg_stoploss:
+            print('Exiting 2nd leg short position due to stoploss hit')
+            leg_squareoff_order_id = squareoff_market_order(kite, bnf_leg_symbol, 2500)
+            stoploss_exit2 = 1
+            kws.unsubscribe([bnf_leg_token])
+            time.sleep(5)
+            break
+        else:
+            time.sleep(1)
 
-orders = kite.orders()
-leg_short_order = next(order for order in orders if order['order_id’] == leg_short_order_id)
-while not leg_short_order['status'] == ‘COMPLETE":
-time.sleep(1)
-print(‘2nd leg short order completed’)
-
-leg_entry_price = leg short_order['average_price’]
-leg_stoploss = leg_entry_price * 1.2
-
-stoploss_exit2 = @
-
-print("2nd leg short entry price:", leg_entry_price)
-print("2nd leg stoploss price:", leg_stoploss)
-
-while dt.datetime.today() < dt.datetime.combine(dt.datetime.today(), TRADER_STOP_TIME):
-
-if ltp_dict[bnf_leg token] > leg_stoploss:
-print(‘Exiting 2nd leg short position due to stoploss hit’)
-leg_squareoff_order_id = squareoff_market_order(kite, bnf_leg symbol, 25)
-stoploss_exit2 = 1
-kws.unsubscribe([bnf_leg_token])
-time.sleep(S)
-break
-else:
-time.sleep(1)
-
-if not stoploss_exit2:
-
-print("Exiting 2nd leg short | ition due to trader's sto;
-
-############# leg_entry_price = leg _short_order['average_price']
-leg_stoploss = leg_entry_price * 1.2
-
-stoploss_exit2 = @
-
-print("2nd leg short entry price:", leg _entry_price)
-print("2nd leg stoploss price:", leg _stoploss)
-
-while dt.datetime.today() < dt.datetime.combine(dt.datetime.today(), TRADER_STOP_TIME):
-
-if ltp_dict{bnf_leg_ token] > leg_stoploss:
-print("Exiting 2nd leg short position due to stoploss hit‘)
-leg_squareoff_order_id = squareoff_market_order(kite, bnf_leg symbol, 25)
-stoploss_exit2 = 1
-kws.unsubscribe([bnf_leg_ token])
-time.sleep(S)
-break
-else:
-time.sleep(1)
-
-if not stoploss_exit2:
-print("Exiting 2nd leg short position due to trader's stop time exceeded”)
-leg_squareoff_order_id = squareoff_market_order(kite, bnf_leg_symbol, 25)
-kws.unsubscribe([bnf_leg_token])
-time.sleep(5)
-
-"""
+    if not stoploss_exit2:
+        print("Exiting 2nd leg short position due to trader's stop loss")
+        leg_squareoff_order_id = squareoff_market_order(kite, bnf_leg_symbol, 2500)
+        kws.unsubscribe([bnf_leg_token])
+        time.sleep(5)
