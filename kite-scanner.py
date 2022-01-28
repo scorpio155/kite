@@ -16,6 +16,11 @@
 # Reference
 # https://stackoverflow.com/questions/39899005/how-to-flatten-a-pandas-dataframe-with-some-columns-as-json
 # https://zhauniarovich.com/post/2021/2021-04-flattening-json-using-pandas/
+# https://www1.nseindia.com/live_market/dynaContent/live_watch/pre_open_market/pre_open_market.htm
+# https://kite.trade/forum/discussion/5768/volume-traded-for-the-day-field-in-quote-packet#latest
+
+# next add logging, check volume, RSI or other indicators to get a filtered list, then another function to trigger trades.
+# telegram alerts and more overall checks and balances to make the code better.
 
 # vote of thanks
 # https://github.com/sreenivasdoosa/sdoosa-algo-trade-python/  -- Sreenivas
